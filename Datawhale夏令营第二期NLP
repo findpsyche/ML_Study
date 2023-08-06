@@ -1,0 +1,143 @@
+记录在ChatGPT生成文本检测器：比赛中，学习到的使用NLP的技术和模型等：
+https://challenge.xfyun.cn/topic/info?type=text-detector&ch=ymfk4uU
+
+NLP：chatgpt生成文本检测：本质：文本分类。   文本分类大类：
+    Baseline的基本思路：https://datawhaler.feishu.cn/docx/NehLd4seGoI8AkxKaAxcG3kRnzd
+数据处理：
+    5大步：
+    1： 数据预处理：
+     A。 收集真实对话和 ChatGPT 生成的对话的数据集。    （在官网数据集中）
+     b. 通过标记文本、删除停用词并将所有文本转换为小写来预处理数据。
+     C。 将数据分为训练集、验证集和测试集。              （方便之后进行操作）
+    2： 特征提取：
+     A。 使用词嵌入等技术（例如 Word2Vec、GloVe）从文本数据中提取特征。
+     b. 考虑使用情感分析、主题建模或命名实体识别等技术来提取其他特征。  
+    （主要转换为向量的方式）
+   3：模型选择和训练：
+     A。 选择合适的机器学习算法进行文本分类，例如朴素贝叶斯、逻辑回归或支持向量机。
+     b. 使用您选择的特征提取器在预处理数据上训练模型。
+     C。 使用网格搜索或随机搜索等技术调整模型的超参数。
+    4：评估：
+     A。 使用测试集来评估模型的性能。
+     b. 测量准确度、精确度、召回率和 F1 分数等指标来评估模型的性能。
+     5部署：
+     A。 一旦您对模型的性能感到满意，您就可以部署它来对新的、未见过的对话进行分类。
+     本赛题预测结果文件按照csv格式提交，编码为UTF-8，第一行为表头
+     提交前请确保预测结果的格式与sample_submit.csv中的格式一致
+
+    通过AIstudio部署最后跑出结果保存为csv格式：
+
+代码：TFIDF方法：
+首先：对于TF-IDF方法： 1：计算词频（TF）  2：计算逆文档频率   3：计算TF-ID，TF-IDF与一个词在文档中的出现次数成正比，与该词在整个语言中的出现次数成反比。
+代码（基于AIstudio）：
+一：传统导入： 涉及import : glob numpy pandas sklearn  (Spical:关于Sklearn:
+viod exp:
+
+  LogisticRegression 是 scikit-learn 的 sklearn.linear_model 模块中的一个类，scikit-learn 是一个流行的 Python 机器学习库,
+  它实现了逻辑回归算法，这是一种用于二元分类问题的监督学习算法。在文本分类的背景下，逻辑回归可用于训练预测给定文本片段的二元标签
+  例如垃圾邮件与非垃圾邮件）的模型
+  一般的使用方法：准备数据：使用词袋或 TF-IDF 等技术将文本数据转换为数字表示形式，从而对文本数据进行预处理。 将您的数据分为训练集和测试集。
+     创建 LogisticRegression 对象：从 sklearn.linear_model 导入 LogisticRegression 类并创建它的实例。
+     拟合模型：使用 fit() 方法根据训练数据训练模型。
+     预测测试数据：使用predict()方法预测测试数据的标签。
+     评估模型：使用准确度、精确度、召回率和 F1 分数等指标来评估模型的性能。
+
+二：准备数据集！
+train_data = pd.read_csv('./ChatGPT生成文本检测器公开数据-更新/train.csv')
+test_data = pd.read_csv('./ChatGPT生成文本检测器公开数据-更新/test.csv')
+
+viod v1:
+  没什么好说的，就是导入训练和测试集
+
+train_data['content'] = train_data['content'].apply(lambda x: x[1:-1])
+test_data['content'] = test_data['content'].apply(lambda x: x[1:-1])
+
+viod v1:
+  train_data['content'] 是一个 pandas 系列，包含 train_data 数据帧的“content”列中的文本数据。
+     apply() 是 pandas 的一种方法，它将给定的函数应用于系列的所有元素。
+     本例中使用的函数是 lambda x: x[1:-1]。 此函数将字符串 x 作为输入，并返回通过删除 x 的第一个和最后一个字符而创建的新字符串。
+     [] 语法用于对字符串进行切片。 x[1:-1] 表示“从第二个字符（索引 1）开始到倒数第二个字符（索引 -1）”。
+因此，train_data['content'].apply(lambda x: x[1:-1]) 的结果是一个包含修改后的文本数据的新系列，其中每个字符串的第一个和最后一个字符已被删除。
+
+三： 特征提取！
+
+# 第1种tfidf参数
+tfidf = TfidfVectorizer(token_pattern=r'\w{1}', max_features=2000)
+train_tfidf = tfidf.fit_transform(train_data['content'])
+test_tfidf = tfidf.fit_transform(test_data['content'])
+print(classification_report(
+    cross_val_predict(
+        LogisticRegression(),
+        train_tfidf,
+        train_data['label']
+    ),
+    train_data['label'],
+    digits=4
+))
+
+# 第2种tfidf参数
+tfidf = TfidfVectorizer(token_pattern=r'\w{1}', max_features=5000)
+train_tfidf = tfidf.fit_transform(train_data['content'])
+test_tfidf = tfidf.fit_transform(test_data['content'])
+print(classification_report(
+    cross_val_predict(
+        LogisticRegression(),
+        train_tfidf,
+        train_data['label']
+    ),
+    train_data['label'],
+    digits=4
+))
+
+# 第3种tfidf参数
+tfidf = TfidfVectorizer(token_pattern=r'\w{1}', max_features=5000, ngram_range=(1,2))
+train_tfidf = tfidf.fit_transform(train_data['content'])
+test_tfidf = tfidf.fit_transform(test_data['content'])
+print(classification_report(
+    cross_val_predict(
+        LogisticRegression(),
+        train_tfidf,
+        train_data['label']
+    ),
+    train_data['label'],
+    digits=4
+))
+
+viod v1:
+  代码#1part解释：
+     tfidf = TfidfVectorizer(token_pattern=r'\w{1}', max_features=2000)：这将创建一个具有以下参数的 TF-IDF 矢量化器对象：
+     token_pattern：此参数指定用于标记文本数据的模式。 在本例中，它设置为 r'\w{1}'，这意味着矢量化器会将文本数据中的每个单词视为单个标记。
+     max_features：此参数指定要包含在矢量化中的特征（即标记）的最大数量。 在本例中，它设置为 2000，这意味着矢量化器将考虑文本数据中最多 2000 个唯一标记。
+     train_tfidf = tfidf.fit_transform(train_data['content'])：这会将 TF-IDF 矢量化器应用于 train_data['content'] 数组，
+     其中包含训练集的文本数据。 生成的数组 train_tfidf 将具有与 train_data['content'] 相同的形状，但具有表示每个标记的 TF-IDF 分数的数值。
+     test_tfidf = tfidf.fit_transform(test_data['content'])：这会将 TF-IDF 矢量化器应用于 test_data['content'] 数组，其中包含测试集的文本数据。
+     生成的数组 test_tfidf 将具有与 test_data['content'] 相同的形状，但具有表示每个标记的 TF-IDF 分数的数值。
+     print(classification_report(cross_val_predict(LogisticRegression(), train_tfidf, train_data['label']), train_data['label'],digits=4))：
+     打印在 TF-IDF 上训练的逻辑回归模型的分类报告 转换训练数据。 该报告包括准确性、精确度、召回率和 F1 分数等指标。
+     cross_val_predict 函数用于使用 TF-IDF 转换后的数据来预测训练数据的标签，classification_report 函数用于生成报告。 digits=4 参数指定要在报告中显示的小数位数。
+     目是使用 TF-IDF 向量化和逻辑回归执行文本分类。 TF-IDF 矢量化器将文本数据转换为可用作逻辑回归模型输入的数值表示，并在 TF-IDF 转换数据上训练模型以预测训练数据的标签。
+     然后生成分类报告以评估模型的性能。
+
+四：模型训练、评估与优化
+
+m = LogisticRegression()
+    m.fit(
+    train_tfidf,
+    train_data['label']
+)
+
+void v1:
+     m = LogisticRegression()：创建 LogisticRegression 类的实例。
+     m.fit(train_tfidf, train_data['label'])：在 TF-IDF 转换后的训练数据和相应标签上训练逻辑回归模型。
+     fit() 方法将返回经过训练的模型，然后可以使用该模型使用predict() 方法对新数据进行预测。
+
+
+五：结果输出！
+test_data['label'] = m.predict(test_tfidf)
+test_data[['name', 'label']].to_csv('tfidf.csv', index=None)
+
+void v1:
+  很简单的输出,test_data['label'] = m.predict(test_tfidf) 将测试数据的预测标签分配给 test_data 数据框中名为 label 的新列。
+  m.predict(test_tfidf) 部分使用经过训练的逻辑回归模型 m 来预测测试数据的标签，该标签存储在 test_tfidf 变量中。 然后将预测的标签分配给 test_data 数据帧的标签列。
+  代码 test_data[['name', 'label']].to_csv('tfidf.csv', index=None) 将带有新标签列的 test_data 数据帧写入名为 tfidf.csv 的 CSV 文件。
+  index=None 参数指定数据帧不应在输出文件中包含索引（即行号）。

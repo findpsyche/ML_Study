@@ -1,0 +1,17 @@
+互联网+百度比赛：
+SYNU：https://synuedu.woczx.com/#/app/enterprise/sendBP/6231092947583232000
+互联网+官网：https://cy.ncss.cn
+百度云：https://login.bce.baidu.com/?account=&redirect=http%3A%2F%2Fconsole.bce.baidu.com%2Fai%2F%3Ffromai%3D1#/ai/speech/overview/index
+Aistudio：https://aistudio.baidu.com/aistudio/index
+
+目前思路：文本信息提取，分类、识别信息、api调用整理成一句简短的话语。
+
+  第一步：信息提取：
+  数据源：arXiv数据集-跨STEM的1.7M +学术论文的arXiv数据集和元数据  Link:https://www.kaggle.com/datasets/Cornell-University/arxiv
+    调用方法：# List files:
+    gsutil cp gs://arxiv-dataset/arxiv/
+    # Download pdfs from March 2020:
+    gsutil cp gs://arxiv-dataset/arxiv/arxiv/pdf/2003/ ./a_local_directory/
+    # Download all the source files
+    gsutil cp -r gs://arxiv-dataset/arxiv/  ./a_local_directory/
+  设计信息提取和方法：

@@ -15,3 +15,5 @@ Aistudio：https://aistudio.baidu.com/aistudio/index
     # Download all the source files
     gsutil cp -r gs://arxiv-dataset/arxiv/  ./a_local_directory/
   设计信息提取和方法：
+
+8.10：在做C4航天组，鸽一天

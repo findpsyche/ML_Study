@@ -1,0 +1,36 @@
+SLAM前端场景理解的开始和现在以及个人工作
+
+历史：
+场景语义理解和SLAM。早期的工作主要集中在基于几何特征(如点、线、平面等)的场景理解上,例如:
+
+    1999年,Rui Kuemmerle等人提出了基于线和平面特征的SLAM算法,实现了对结构化环境的建图。
+    2003年,David Hähnel等人利用平面特征对室内环境进行了语义建模。
+
+随着深度学习的兴起,基于深度学习的语义理解方法:
+
+    2015年,Sergey Zagoruyko等人提出了CNN-SLAM,首次将CNN应用于SLAM的场景理解中。
+    2017年,Tao Feng等人提出了基于SegNet进行语义分割的SegMap系统,将语义信息融入SLAM过程中。
+
+
+现在：
+目前,将深度学习与SLAM相结合以提升场景理解能力已成为研究热点。一些值得关注的最新进展包括:
+
+    基于语义分割的SLAM:将语义分割用于移除动态物体、提高特征关联的鲁棒性等(PL-SLAM、MaskFusion等)。
+    基于实例分割的SLAM:利用实例级别的语义信息提高物体关联和定位的准确性(InsSeg-SLAM、InstMap等)。
+    基于端到端的方法:直接从原始数据(RGB、深度等)预测语义和几何信息,进行联合优化(CodeSLAM、ScoringNet等)。
+    跨模态理解:融合视觉、语言等多模态信息,提升高层次场景理解能力(Vision-and-Language Navigation等)。
+
+个人工作：
+（预期）方向：元学习和场景理解结合：
+可能的尝试方法：
+    基于优化的元学习(Optimization-based Meta-Learning)
+    代表工作包括MAML、Meta-SGD等,旨在学习一个可快速适应新任务的好的初始化或更新策略。
+    这些方法在小样本物体识别、视觉追踪等任务中表现不错。
+
+    基于度量学习的元学习(Metric-based Meta-Learning)
+    如MatchingNet、ProtoNet等,旨在学习一个好的嵌入空间,使相同类别实例的特征向量更为紧凑。
+    常用于小样本图像分类、快速建模等场景。
+
+    基于模型的元学习(Model-based Meta-Learning)
+    如Memory Augmented Neural Networks、Neural Turing Machines等,借鉴神经张量网络等思路,显式构建外部存储器与模型交互。
+    对小样本场景具有更强的推理能力。

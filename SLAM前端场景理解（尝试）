@@ -1,3 +1,4 @@
+'''
 SLAM前端场景理解的开始和现在以及个人工作
 
 历史：
@@ -46,36 +47,37 @@ SLAM前端场景理解的开始和现在以及个人工作
     需要显式设计元学习模型如何与ORB-SLAM集成。
 
 code:
+'''
 !pip install opencv-python
 !pip install open3d
 !pip install learn2learn
-###
+'''
 - opencv-python: 用于图像处理和相机操作
 - open3d: 用于三维数据处理和可视化
 - learn2learn: 一个元学习算法库,我们将使用其中的MAML算法
-###
+'''
 #需要下载并导入ORB-SLAM2的代码库:
 
 !git clone https://github.com/raulmur/ORB_SLAM2.git
 `
 
 #需要一些数据集来训练和评测系统。您可以从一些公开的SLAM数据集库中下载,比如:
-
+'''
 - TUM RGB-D Dataset: https://vision.in.tum.de/data/datasets/rgbd-dataset
 - ICL-NUIM Dataset: https://www.doc.ic.ac.uk/~ahanda/VaFRIC/iclnuim.html
 - ScanNet Dataset: http://www.scan-net.org/
-
+'''
 #下载TUM RGB-D Dataset的freiburg2_desk序列:
 
 !gdown https://arhri.bournemouth.ac.uk/share/688e6c2d-5e38-460f-9eeb-72bd80ad9a84
 !unzip freiburg2_desk.zip
 
-###
+'''
 1. 使用ORB-SLAM2运行一次,获得相机位姿和稀疏地图
 2. 基于位姿投影生成密集深度图 
 3. 使用半自动标注工具(如EDE)为密集深度图标注语义标签
 4. 将RGB图像和语义标签对作为训练数据
-###
+'''
 # 运行ORB-SLAM2获取相机轨迹和稀疏地图
 traj, sparse_map = run_orbslam2(rgb_frames, depth_frames)
 

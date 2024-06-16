@@ -1,0 +1,186 @@
+#最新版本的learn2learn 解压的.tgz文件 .tgz数据文件是TMU RGB-D 数据集
+# TMU- RGB-D:https://cvg.cit.tum.de/data/datasets/rgbd-dataset
+
+import os
+from typing import List, Tuple
+import random
+import tarfile
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision import transforms
+from PIL import Image
+from torch.utils.data import Dataset
+from learn2learn.algorithms import MAML
+
+# 定义数据集类
+class RGBDSceneSegmentationDataset(Dataset):
+    def __init__(self, dataset_path: str, mode: str = 'train', test_ratio: float = 0.2):
+        self.dataset_path = dataset_path
+        self.rgb_paths = []
+        self.depth_paths = []
+        self.transform = transforms.ToTensor()
+        self.mode = mode
+
+        with tarfile.open(dataset_path, 'r') as tar:
+            # 获取一级目录名
+            first_level_dirs = [member.name for member in tar.getmembers() if member.isdir()]
+            if len(first_level_dirs) == 0:
+                raise ValueError("The tar file does not contain any directories.")
+            root_dir = first_level_dirs[0]
+
+            for member in tar.getmembers():
+                if member.name.startswith(f'{root_dir}/rgb/'):
+                    self.rgb_paths.append(member.name)
+                elif member.name.startswith(f'{root_dir}/depth/'):
+                    self.depth_paths.append(member.name)
+
+        # 确保有足够的文件进行划分
+        if len(self.rgb_paths) < 2 or len(self.depth_paths) < 2:
+            raise ValueError("Not enough files for train/test split.")
+
+        num_files = len(self.rgb_paths)
+        num_test = int(test_ratio * num_files)
+        indices = np.arange(num_files)
+        np.random.shuffle(indices)
+
+        # 确保划分后至少有一个文件用于训练和测试
+        if num_test < 1:
+            num_test = 1
+        if num_files - num_test < 1:
+            num_test = num_files - 1
+
+        self.train_indices = indices[num_test:]
+        self.test_indices = indices[:num_test]
+
+    def __len__(self):
+        if self.mode == 'train':
+            return len(self.train_indices)
+        else:
+            return len(self.test_indices)
+
+    def __getitem__(self, idx):
+        with tarfile.open(self.dataset_path, 'r') as tar:
+            if self.mode == 'train':
+                actual_idx = self.train_indices[idx]
+            else:
+                actual_idx = self.test_indices[idx]
+
+            rgb_path = self.rgb_paths[actual_idx]
+            depth_path = self.depth_paths[actual_idx]
+            rgb_file = tar.extractfile(rgb_path)
+            depth_file = tar.extractfile(depth_path)
+            rgb_img = Image.open(rgb_file).convert('RGB')
+            depth_img = Image.open(depth_file).convert('L')
+
+            # 将图像转换为张量
+            rgb_tensor = self.transform(rgb_img)
+            depth_tensor = self.transform(depth_img)
+
+        return rgb_tensor, depth_tensor
+
+# 定义任务采样函数
+def sample_tasks(dataset: RGBDSceneSegmentationDataset, num_tasks: int, num_support: int, num_query: int) -> Tuple[List, List]:
+    tasks = []
+    for _ in range(num_tasks):
+        indices = random.sample(range(len(dataset)), num_support + num_query)
+        support_indices = indices[:num_support]
+        query_indices = indices[num_support:]
+
+        support_data = [(dataset[i][0], dataset[i][1], torch.zeros(2)) for i in support_indices]
+        query_data = [(dataset[i][0], dataset[i][1], torch.zeros(2)) for i in query_indices]
+
+        tasks.append((support_data, query_data))
+
+    support_data, query_data = zip(*tasks)
+    return list(support_data), list(query_data)
+
+# 定义语义分割模型
+class SceneSegmentationModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # 定义模型结构
+        self.conv1 = nn.Conv2d(4, 32, kernel_size=3, stride=2, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1)
+        self.bn3 = nn.BatchNorm2d(128)
+        self.fc1 = nn.Linear(128 * 8 * 8, 256)
+        self.fc2 = nn.Linear(256, 64)
+        self.fc3 = nn.Linear(64, 32)
+        self.fc4 = nn.Linear(32, 2)
+
+    def forward(self, rgb, depth):
+        # 将 RGB 和深度图像拼接在通道维度上
+        depth = depth.repeat(1, 3, 1, 1)  # 将深度图像重复3次以匹配RGB图像的通道数
+        x = torch.cat([rgb, depth], dim=1)
+        
+        # 卷积层
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.relu(self.bn3(self.conv3(x)))
+        
+        # 全连接层
+        x = x.view(-1, 128 * 8 * 8)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+        x = self.fc4(x)
+        
+        return x
+
+# 创建 MAML 的封装类
+class MAMLWrapper:
+    def __init__(self, model, lr=1e-3):
+        self.maml = MAML(model, lr=lr)
+    
+    def __call__(self, support_rgb, support_depth, query_rgb, query_depth):
+        support_data = list(zip(support_rgb, support_depth))
+        query_data = list(zip(query_rgb, query_depth))
+        return self.maml(support_data, query_data)
+
+# 加载数据集
+dataset_path = '/content/drive/MyDrive/rgbd_dataset_freiburg1_rpy.tgz'
+meta_train_dataset = RGBDSceneSegmentationDataset(dataset_path, mode='train', test_ratio=0.2)
+meta_test_dataset = RGBDSceneSegmentationDataset(dataset_path, mode='test', test_ratio=0.2)
+
+# 定义模型和元学习算法
+model = SceneSegmentationModel()
+maml_wrapper = MAMLWrapper(model, lr=1e-3)
+
+# 训练循环
+num_epochs = 100
+num_tasks = 16
+num_support = 5
+num_query = 10
+
+for epoch in range(num_epochs):
+    # 从训练集中采样任务
+    support_data, query_data = sample_tasks(meta_train_dataset, num_tasks, num_support, num_query)
+
+    # 将数据转换为张量
+    support_rgb = torch.stack([s[0] for task in support_data for s in task])
+    support_depth = torch.stack([s[1] for task in support_data for s in task])
+    query_rgb = torch.stack([q[0] for task in query_data for q in task])
+    query_depth = torch.stack([q[1] for task in query_data for q in task])
+
+    # 检查数据形状是否匹配
+    print(f"Support RGB shape: {support_rgb.shape}")
+    print(f"Support Depth shape: {support_depth.shape}")
+    print(f"Query RGB shape: {query_rgb.shape}")
+    print(f"Query Depth shape: {query_depth.shape}")
+
+    # 执行元训练步骤
+    loss, _ = maml_wrapper(support_rgb, support_depth, query_rgb, query_depth)
+
+    # 打印损失
+    print(f'Epoch {epoch+1} | Loss: {loss.item()}')
+
+    # 在测试集上评估模型
+    # ...
+
+# 获得训练好的语义分割模型
+segmentation_model = maml_wrapper.maml.model

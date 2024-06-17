@@ -1,2 +1,3 @@
 24腾讯犀牛鸟开源之夏：
 angel机器学习方向：
+link：https://github.com/Tencent/OpenSourceTalent/issues/4

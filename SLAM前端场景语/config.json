@@ -1,0 +1,1 @@
+{"num_epochs": 100, "num_tasks_per_epoch": 16, "num_support": 5, "num_query": 10, "learning_rate": 0.001, "meta_learning_rate": 0.001}

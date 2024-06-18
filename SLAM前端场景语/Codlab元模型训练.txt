@@ -28,238 +28,175 @@ with tarfile.open(dataset_path_2, 'r:gz') as tar:
     tar.extractall(tar_dir_2)
 
 
-
 import os
-from typing import List, Tuple
 import random
 import tarfile
-
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
-from torch.utils.data import Dataset
 from learn2learn.algorithms import MAML
 
-
-# 定义数据集类
+# 数据集类定义
 class RGBDSceneSegmentationDataset(Dataset):
-    def __init__(self, dataset_paths: List[str], mode: str = 'train', test_ratio: float = 0.2):
-        self.dataset_paths = dataset_paths
+    def __init__(self, dataset_paths, mode='train', test_ratio=0.2):
         self.rgb_paths = []
         self.depth_paths = []
-        self.transform = transforms.ToTensor()
+        self.transform = transforms.Compose([
+            transforms.Resize((128, 128)),
+            transforms.ToTensor()
+        ])
         self.mode = mode
 
         for dataset_path in dataset_paths:
             with tarfile.open(dataset_path, 'r') as tar:
-                # 获取所有一级目录名
-                first_level_dirs = [member.name.split('/')[0] for member in tar.getmembers() if member.isdir()]
-                if len(first_level_dirs) == 0:
-                    raise ValueError(f"The tar file {dataset_path} does not contain any directories.")
+                tar.extractall(path='/tmp/dataset/')
+                extracted_path = os.path.join('/tmp/dataset', os.path.splitext(os.path.basename(dataset_path))[0])
+                rgb_dir = os.path.join(extracted_path, 'rgb')
+                depth_dir = os.path.join(extracted_path, 'depth')
 
-                for root_dir in first_level_dirs:
-                    rgb_paths_in_dir = []
-                    depth_paths_in_dir = []
-                    for member in tar.getmembers():
-                        if member.name.startswith(f'{root_dir}/rgb/'):
-                            rgb_paths_in_dir.append(member.name)
-                        elif member.name.startswith(f'{root_dir}/depth/'):
-                            depth_paths_in_dir.append(member.name)
+                rgb_files = sorted([f for f in os.listdir(rgb_dir) if f.endswith(('.png', '.jpg'))])
+                depth_files = sorted([f for f in os.listdir(depth_dir) if f.endswith(('.png', '.jpg'))])
 
-                    # 只保留存在RGB或深度图像的文件
-                    rgb_paths_in_dir = set([path.split('/')[-1] for path in rgb_paths_in_dir])
-                    depth_paths_in_dir = set([path.split('/')[-1] for path in depth_paths_in_dir])
-                    all_paths = rgb_paths_in_dir.union(depth_paths_in_dir)
+                min_length = min(len(rgb_files), len(depth_files))
+                rgb_files = rgb_files[:min_length]
+                depth_files = depth_files[:min_length]
 
-                    self.rgb_paths.extend([f'{root_dir}/rgb/{path}' for path in all_paths if f'{root_dir}/rgb/{path}' in rgb_paths_in_dir])
-                    self.depth_paths.extend([f'{root_dir}/depth/{path}' for path in all_paths if f'{root_dir}/depth/{path}' in depth_paths_in_dir])
+                for rgb_file, depth_file in zip(rgb_files, depth_files):
+                    self.rgb_paths.append(os.path.join(rgb_dir, rgb_file))
+                    self.depth_paths.append(os.path.join(depth_dir, depth_file))
 
-        # 确保RGB和深度图像数量相同
-        if len(self.rgb_paths) != len(self.depth_paths):
-            raise ValueError("The number of RGB images and depth images does not match.")
-
-        # 确保有足够的文件进行划分
-        if len(self.rgb_paths) < 2 or len(self.depth_paths) < 2:
-            raise ValueError("Not enough files for train/test split.")
-
-        # 划分训练和测试集
+        indices = list(range(len(self.rgb_paths)))
+        split = int(np.floor(test_ratio * len(self.rgb_paths)))
         if mode == 'train':
-            num_train = int(len(self.rgb_paths) * (1 - test_ratio))
-            self.train_indices = list(range(num_train))
-            self.test_indices = list(range(num_train, len(self.rgb_paths)))
+            self.indices = indices[split:]
         else:
-            num_train = int(len(self.rgb_paths) * (1 - test_ratio))
-            self.train_indices = list(range(num_train))
-            self.test_indices = list(range(num_train, len(self.rgb_paths)))
+            self.indices = indices[:split]
 
     def __len__(self):
-        if self.mode == 'train':
-            return len(self.train_indices)
-        else:
-            return len(self.test_indices)
+        return len(self.indices)
 
     def __getitem__(self, idx):
-        with tarfile.open(self.dataset_paths[0], 'r') as tar:
-            if self.mode == 'train':
-                actual_idx = self.train_indices[idx]
-            else:
-                actual_idx = self.test_indices[idx]
+        actual_idx = self.indices[idx]
+        rgb_path = self.rgb_paths[actual_idx]
+        depth_path = self.depth_paths[actual_idx]
 
-            rgb_path = self.rgb_paths[actual_idx]
-            depth_path = self.depth_paths[actual_idx]
-            rgb_file = tar.extractfile(rgb_path)
-            depth_file = tar.extractfile(depth_path)
-            rgb_img = Image.open(rgb_file).convert('RGB')
-            depth_img = Image.open(depth_file).convert('L')
+        rgb_img = Image.open(rgb_path).convert('RGB')
+        depth_img = Image.open(depth_path).convert('L')
 
-            # 将图像转换为张量
-            rgb_tensor = self.transform(rgb_img)
-            depth_tensor = self.transform(depth_img)
+        rgb_tensor = self.transform(rgb_img)
+        depth_tensor = self.transform(depth_img)
 
         return rgb_tensor, depth_tensor
 
-# 定义任务采样函数
-def sample_tasks(dataset: RGBDSceneSegmentationDataset, num_tasks: int, num_support: int, num_query: int) -> Tuple[List, List]:
+# 任务采样函数
+def sample_tasks(dataset, num_tasks, num_support, num_query):
     tasks = []
     for _ in range(num_tasks):
         indices = random.sample(range(len(dataset)), num_support + num_query)
         support_indices = indices[:num_support]
         query_indices = indices[num_support:]
-
-        support_data = [(dataset[i][0], dataset[i][1], torch.zeros(2)) for i in support_indices]
-        query_data = [(dataset[i][0], dataset[i][1], torch.zeros(2)) for i in query_indices]
-
+        support_data = [(dataset[i][0], dataset[i][1]) for i in support_indices]
+        query_data = [(dataset[i][0], dataset[i][1]) for i in query_indices]
         tasks.append((support_data, query_data))
+    return tasks
 
-    support_data, query_data = zip(*tasks)
-    return list(support_data), list(query_data)
-
-# 定义语义分割模型
+# 语义分割模型定义
 class SceneSegmentationModel(nn.Module):
     def __init__(self):
         super().__init__()
-        # 定义模型结构
-        self.conv1 = nn.Conv2d(6, 32, kernel_size=3, stride=2, padding=1)
-        self.bn1 = nn.BatchNorm2d(32)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)
-        self.bn2 = nn.BatchNorm2d(64)
-        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1)
-        self.bn3 = nn.BatchNorm2d(128)
-        self.fc1 = nn.Linear(128 * 8 * 8, 256)
-        self.fc2 = nn.Linear(256, 64)
-        self.fc3 = nn.Linear(64, 32)
-        self.fc4 = nn.Linear(32, 2)
+        self.conv1 = nn.Conv2d(4, 4, kernel_size=3, stride=2, padding=1)
+        self.bn1 = nn.BatchNorm2d(4)
+        self.conv2 = nn.Conv2d(4, 8, kernel_size=3, stride=2, padding=1)
+        self.bn2 = nn.BatchNorm2d(8)
+        self.conv3 = nn.Conv2d(8, 16, kernel_size=3, stride=2, padding=1)
+        self.bn3 = nn.BatchNorm2d(16)
+        self.fc1 = nn.Linear(16 * 16 * 16, 32)
+        self.fc2 = nn.Linear(32, 16)
+        self.fc3 = nn.Linear(16, 2)
 
     def forward(self, rgb, depth):
-        # 遍历输入列表
-        outputs = []
-        for rgb_tensor, depth_tensor in zip(rgb, depth):
-            # 将 RGB 和深度图像拼接在通道维度上
-            depth_tensor = depth_tensor.repeat(1, 3, 1, 1)  # 将深度图像重复3次以匹配RGB图像的通道数
-            x = torch.cat([rgb_tensor, depth_tensor], dim=1)
+        x = torch.cat([rgb, depth], dim=1)
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = x.view(-1, 16 * 16 * 16)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
 
-            # 卷积层
-            x = F.relu(self.bn1(self.conv1(x)))
-            x = F.relu(self.bn2(self.conv2(x)))
-            x = F.relu(self.bn3(self.conv3(x)))
-
-            # 全连接层
-            x = x.view(-1, 128 * 8 * 8)
-            x = F.relu(self.fc1(x))
-            x = F.relu(self.fc2(x))
-            x = F.relu(self.fc3(x))
-            x = self.fc4(x)
-
-            outputs.append(x)
-
-        return outputs
-
-# 创建 MAML 的封装类
+# MAML封装类定义
 class MAMLWrapper:
     def __init__(self, model, lr=1e-3):
-        self.maml = MAML(model(), lr=lr)
+        self.maml = MAML(model, lr=lr, first_order=True)
 
-    def __call__(self, support_rgb, support_depth, query_rgb, query_depth):
-        support_data = list(zip(support_rgb, support_depth))
-        query_data = list(zip(query_rgb, query_depth))
-        support_outputs = self.maml.module(support_rgb, support_depth)
-        query_outputs = self.maml.module(query_rgb, query_depth)
-        support_outputs = torch.cat(support_outputs, dim=0)
-        query_outputs = torch.cat(query_outputs, dim=0)
-        return self.maml(support_data, query_data, support_outputs, query_outputs)
+    def __call__(self, support_data, query_data):
+        support_tensors = [torch.stack([data[i] for data in support_data]) for i in range(2)]
+        query_tensors = [torch.stack([data[i] for data in query_data]) for i in range(2)]
+
+        support_labels = torch.zeros(len(support_tensors[0]), dtype=torch.long)
+        query_labels = torch.zeros(len(query_tensors[0]), dtype=torch.long)
+
+        support_preds = self.maml.module(support_tensors[0], support_tensors[1])
+        query_preds = self.maml.module(query_tensors[0], query_tensors[1])
+
+        support_loss = F.cross_entropy(support_preds, support_labels)
+        query_loss = F.cross_entropy(query_preds, query_labels)
+
+        self.maml.adapt(support_loss)
+
+        return query_loss
 
 # 加载数据集
-dataset_paths = ['/content/dataset/rgbd_dataset_freiburg1_rpy.tgz',
-                 '/content/dataset/rgbd_dataset_freiburg1_xyz.tgz']
-meta_train_dataset = RGBDSceneSegmentationDataset(dataset_paths, mode='train', test_ratio=0.2)
-meta_test_dataset = RGBDSceneSegmentationDataset(dataset_paths, mode='test', test_ratio=0.2)
+dataset_paths = [
+    '/content/drive/MyDrive/rgbd_dataset_freiburg1_rpy.tgz',
+    '/content/drive/MyDrive/rgbd_dataset_freiburg1_xyz.tgz'
+]
+meta_train_dataset = RGBDSceneSegmentationDataset(dataset_paths, mode='train')
+meta_test_dataset = RGBDSceneSegmentationDataset(dataset_paths, mode='test')
 
 # 定义模型和元学习算法
 model = SceneSegmentationModel()
 maml_wrapper = MAMLWrapper(model, lr=1e-3)
 
-# 训练循环
+# 调整训练过程
 num_epochs = 100
-num_tasks = 16
+num_tasks_per_epoch = 16
 num_support = 5
 num_query = 10
 
 for epoch in range(num_epochs):
-    # 从训练集中采样任务
-    support_data, query_data = sample_tasks(meta_train_dataset, num_tasks, num_support, num_query)
+    epoch_loss = 0.0
 
-    # 将数据转换为张量
-    support_rgb = torch.stack([s[0] for task in support_data for s in task])
-    support_depth = torch.stack([s[1] for task in support_data for s in task])
-    query_rgb = torch.stack([q[0] for task in query_data for q in task])
-    query_depth = torch.stack([q[1] for task in query_data for q in task])
+    tasks = sample_tasks(meta_train_dataset, num_tasks_per_epoch, num_support, num_query)
 
-    # 检查数据形状是否匹配
-    print(f"Support RGB shape: {support_rgb.shape}")
-    print(f"Support Depth shape: {support_depth.shape}")
-    print(f"Query RGB shape: {query_rgb.shape}")
-    print(f"Query Depth shape: {query_depth.shape}")
+    for support_data, query_data in tasks:
+        query_loss = maml_wrapper(support_data, query_data)
+        epoch_loss += query_loss.item()
 
-    # 执行元训练步骤
-    loss, _ = maml_wrapper(support_rgb, support_depth, query_rgb, query_depth)
+    avg_loss = epoch_loss / num_tasks_per_epoch
+    print(f'Epoch {epoch+1} | Average Loss: {avg_loss:.4f}')
 
-    # 打印损失
-    print(f'Epoch {epoch+1} | Loss: {loss.item()}')
-
-# 测试循环
-num_test_tasks = 16
-num_test_support = 5
-num_test_query = 10
-
+# 测试过程
+test_tasks = sample_tasks(meta_test_dataset, num_tasks_per_epoch, num_support, num_query)
 test_accuracies = []
 
-for _ in range(num_test_tasks):
-    # 从测试集中采样任务
-    support_data, query_data = sample_tasks(meta_test_dataset, 1, num_test_support, num_test_query)
+for support_data, query_data in test_tasks:
+    support_tensors = [torch.stack([data[i] for data in support_data]) for i in range(2)]
+    query_tensors = [torch.stack([data[i] for data in query_data]) for i in range(2)]
 
-    # 将数据转换为张量
-    support_rgb = torch.stack([s[0] for s in support_data[0]])
-    support_depth = torch.stack([s[1] for s in support_data[0]])
-    query_rgb = torch.stack([q[0] for q in query_data[0]])
-    query_depth = torch.stack([q[1] for q in query_data[0]])
+    support_labels = torch.zeros(len(support_tensors[0]), dtype=torch.long)
+    query_labels = torch.zeros(len(query_tensors[0]), dtype=torch.long)
 
-    # 进行预测
-    support_outputs = segmentation_model(support_rgb, support_depth)
-    query_outputs = segmentation_model(query_rgb, query_depth)
+    maml_wrapper.maml.module.eval()
+    with torch.no_grad():
+        query_preds = model(query_tensors[0], query_tensors[1])
+        query_accuracy = (query_preds.argmax(dim=1) == query_labels).float().mean().item()
+        test_accuracies.append(query_accuracy)
 
-    # 计算准确性
-    support_targets = torch.stack([s[2] for s in support_data[0]])
-    query_targets = torch.stack([q[2] for q in query_data[0]])
-    support_accuracy = torch.mean((support_outputs.argmax(dim=1) == support_targets).float())
-    query_accuracy = torch.mean((query_outputs.argmax(dim=1) == query_targets).float())
-
-    test_accuracies.append(query_accuracy.item())
-
-# 计算并打印最终测试准确率
 final_test_accuracy = sum(test_accuracies) / len(test_accuracies)
 print(f"Final test accuracy: {final_test_accuracy * 100:.2f}%")
-# 获得训练好的语义分割模型
-segmentation_model = maml_wrapper.maml.model
+
